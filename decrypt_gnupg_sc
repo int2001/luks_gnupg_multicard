@@ -1,0 +1,52 @@
+#!/bin/sh
+
+export GNUPGHOME="/lib/cryptsetup/gpg"
+
+serial=""
+decrypt_dir="/etc/keys/"
+
+# loop indefinitely until we can acquire the serial number of one Card
+while /bin/test -z "$serial" ; do
+    # Check Card in Slot 0
+    serial="$(/usr/bin/gpg -q --batch --reader-port 0 --card-status 2>/dev/null | /bin/grep "^Serial number" | /bin/sed -e 's/:/\n/g' | /bin/tail -n 1 | /bin/sed -e 's/\s//g')"
+    # Set ReeaderPort to 0
+    rp=0
+
+    if /bin/test -z "$serial" ; then
+    	# Check Card in Slot 1
+    	serial="$(/usr/bin/gpg -q --batch --reader-port 1 --card-status 2>/dev/null | /bin/grep "^Serial number" | /bin/sed -e 's/:/\n/g' | /bin/tail -n 1 | /bin/sed -e 's/\s//g')"
+    	# Set ReeaderPort to 1
+	rp=1
+    fi
+
+    if /bin/test -z "$serial" ; then
+        # we couldn't find a card, so wait
+        sleep 1
+    fi
+done
+
+# select the decryption key based on the card number.
+# yep, this really is the only solution.
+
+case $serial in 
+    12345678)
+        decrypt_dir="/etc/keys/12345678/"
+        ;;
+    87654321)
+        decrypt_dir="/etc/keys/87654321/"
+        ;;
+    *)
+	# Fallback
+	decrypt_dir="/etc/keys/"
+	rp=0
+	;;
+esac
+
+# okay, so we've determined the serial and the decryption key, so #dowerk
+if ! /lib/cryptsetup/askpass "Enter passphrase: " | \
+    /usr/bin/gpg -q --batch --reader-port $rp --no-random-seed-file --homedir $decrypt_dir \
+         --ignore-valid-from --ignore-time-conflict --passphrase-fd 0 --decrypt $1 2>/dev/null ; then
+    return 1
+fi
+
+return 0
